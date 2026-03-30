@@ -1,0 +1,177 @@
+# https://taskfile.dev
+version: "3"
+
+tasks:
+  # ---------- Meta ----------
+  default:
+    desc: List available tasks
+    cmds:
+      - task --list-all
+
+  # ---------- Quality ----------
+  fmt:
+    desc: Auto-format code with rustfmt
+    cmds:
+      - cargo fmt
+
+  fmt:check:
+    desc: Check formatting without modifying files
+    cmds:
+      - cargo fmt --check
+
+  lint:
+    desc: Run clippy linter (auto-fix)
+    cmds:
+      - cargo clippy --fix --allow-dirty -- -D warnings
+
+  lint:check:
+    desc: Run clippy linter (check only, no fixes)
+    cmds:
+      - cargo clippy -- -D warnings
+
+  check:
+    desc: Run all quality checks (lint, format, build)
+    cmds:
+      - task: fmt:check
+      - task: lint:check
+      - task: build
+
+  fix:
+    desc: Auto-fix lint issues and reformat
+    cmds:
+      - task: lint
+      - task: fmt
+
+  # ---------- Build ----------
+  build:
+    desc: Build the project (debug)
+    cmds:
+      - cargo build
+
+  build:release:
+    desc: Build the project (release, optimised)
+    cmds:
+      - cargo build --release
+
+  # ---------- Run: ASR ----------
+  run:asr:
+    desc: Run the ASR demo binary
+    deps: [build]
+    cmds:
+      - cargo run --bin vibe-asr -- {{.CLI_ARGS}}
+
+  run:asr:example:
+    desc: "Run an ASR example (usage: task run:asr:example -- basic_transcribe)"
+    cmds:
+      - cargo run --example {{.CLI_ARGS}}
+
+  # ---------- Run: TTS ----------
+  run:tts:
+    desc: Run the TTS demo binary
+    deps: [build]
+    cmds:
+      - cargo run --bin vibe-tts
+
+  run:tts:example:
+    desc: "Run a TTS example (usage: task run:tts:example -- status)"
+    cmds:
+      - cargo run --example {{.CLI_ARGS}}
+
+  # ---------- Run: Realtime Streaming TTS ----------
+  run:realtime:
+    desc: Run the Realtime streaming TTS demo binary
+    deps: [build]
+    cmds:
+      - cargo run --bin vibe-realtime -- {{.CLI_ARGS}}
+
+  run:realtime:example:
+    desc: "Run a Realtime example (usage: task run:realtime:example -- basic_synthesis)"
+    cmds:
+      - cargo run --example {{.CLI_ARGS}}
+
+  run:realtime:basic:
+    desc: Basic single-voice synthesis demo
+    cmds:
+      - cargo run --example basic_synthesis -- {{.CLI_ARGS}}
+
+  run:realtime:multi-voice:
+    desc: Multi-voice demo (EN/SP/KR, 9 utterances)
+    cmds:
+      - cargo run --example multi_voice_demo -- {{.CLI_ARGS}}
+
+  run:realtime:bilingual:
+    desc: Bilingual EN/KR long-form demo (22 segments)
+    cmds:
+      - cargo run --example bilingual_long_demo -- {{.CLI_ARGS}}
+
+  run:realtime:folktale:
+    desc: "Korean folktale: 해와 달이 된 오누이 (20 segments)"
+    cmds:
+      - cargo run --example korean_folktale -- {{.CLI_ARGS}}
+
+  run:realtime:all:
+    desc: Run all Realtime streaming TTS examples
+    cmds:
+      - task: run:realtime:basic
+      - task: run:realtime:multi-voice
+      - task: run:realtime:bilingual
+      - task: run:realtime:folktale
+
+  # ---------- Run: All models ----------
+  run:asr:all:
+    desc: Run all ASR examples
+    cmds:
+      - cargo run --example basic_transcribe -- {{.CLI_ARGS}}
+
+  run:tts:all:
+    desc: Run all TTS examples
+    cmds:
+      - cargo run --example status
+
+  run:all:
+    desc: Run all example scripts across ASR, TTS, and Realtime
+    cmds:
+      - task: run:tts:all
+      - task: run:asr:all
+      - task: run:realtime:all
+
+  # ---------- Test ----------
+  test:
+    desc: Run tests with cargo test
+    cmds:
+      - cargo test {{.CLI_ARGS}}
+
+  # ---------- Stats ----------
+  loc:
+    desc: Lines-of-code summary (tokei)
+    cmds:
+      - tokei src/ examples/
+
+  loc:file:
+    desc: Per-file lines-of-code breakdown (tokei)
+    cmds:
+      - tokei src/ examples/ --files
+
+  # ---------- Project ----------
+  clean:
+    desc: Remove build artifacts and generated output
+    cmds:
+      - cargo clean
+      - rm -rf output/
+      - find . -name '*.wav' -path './output/*' -delete 2>/dev/null || true
+
+  # ---------- Setup ----------
+  voices:
+    desc: Download all voice prompts (default + experimental)
+    cmds:
+      - bash demo/download_voices.sh
+
+  voices:default:
+    desc: Download default voice prompts only
+    cmds:
+      - bash demo/download_voices.sh --default
+
+  voices:experimental:
+    desc: Download experimental voice prompts only
+    cmds:
+      - bash demo/download_voices.sh --experimental

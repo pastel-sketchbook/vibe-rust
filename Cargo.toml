@@ -1,0 +1,54 @@
+[package]
+name = "vibe-rust"
+version = "0.1.0"
+edition = "2024"
+description = "Rust port of vibe-demo — hands-on exploration of Microsoft VibeVoice Voice AI models"
+license = "MIT"
+
+[dependencies]
+anyhow = "1.0.102"
+clap = { version = "4.6.0", features = ["derive"] }
+hf-hub = "0.5.0"
+hound = "3.5.1"
+ndarray = "0.17.2"
+symphonia = { version = "0.5.5", features = ["wav", "pcm", "mp3"] }
+thiserror = "2.0.18"
+
+[dev-dependencies]
+tempfile = "3"
+
+[[bin]]
+name = "vibe-asr"
+path = "src/bin/asr.rs"
+
+[[bin]]
+name = "vibe-tts"
+path = "src/bin/tts.rs"
+
+[[bin]]
+name = "vibe-realtime"
+path = "src/bin/realtime.rs"
+
+[[example]]
+name = "status"
+path = "examples/tts/status.rs"
+
+[[example]]
+name = "basic_transcribe"
+path = "examples/asr/basic_transcribe.rs"
+
+[[example]]
+name = "basic_synthesis"
+path = "examples/realtime/basic_synthesis.rs"
+
+[[example]]
+name = "multi_voice_demo"
+path = "examples/realtime/multi_voice_demo.rs"
+
+[[example]]
+name = "bilingual_long_demo"
+path = "examples/realtime/bilingual_long_demo.rs"
+
+[[example]]
+name = "korean_folktale"
+path = "examples/realtime/korean_folktale.rs"
