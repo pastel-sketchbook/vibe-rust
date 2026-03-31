@@ -1,1 +1,9 @@
 /target
+/output/
+/models/
+demo/voices/
+*.wav
+*.mp3
+*.pt
+*.npz
+.env

@@ -19,6 +19,7 @@ use anyhow::Result;
 use clap::Parser;
 
 use vibe_rust::asr::{self, AsrConfig, AsrModel};
+use vibe_rust::constants;
 use vibe_rust::utils::{self, Timer};
 
 #[derive(Parser)]
@@ -37,12 +38,16 @@ struct Cli {
     device: Option<String>,
 
     /// Maximum new tokens to generate
-    #[arg(long, default_value_t = 32_768)]
+    #[arg(long, default_value_t = constants::ASR_MAX_TOKENS)]
     max_tokens: u32,
 
     /// Sampling temperature (0 = greedy)
-    #[arg(long, default_value_t = 0.0)]
+    #[arg(long, default_value_t = constants::ASR_TEMPERATURE)]
     temperature: f32,
+
+    /// Nucleus sampling threshold (1.0 = disabled)
+    #[arg(long, default_value_t = constants::ASR_TOP_P)]
+    top_p: f32,
 }
 
 fn resolve_audio(path: Option<PathBuf>) -> PathBuf {
@@ -94,7 +99,10 @@ fn main() -> Result<()> {
         Err(e) => {
             eprintln!("\nCould not load ASR model: {e}");
             eprintln!("Hint: the 7B model needs ~16 GB VRAM (CUDA) or ~28 GB RAM (CPU/MPS).");
-            eprintln!("Download it first with:  hf download microsoft/VibeVoice-ASR");
+            eprintln!(
+                "Download it first with:  {}",
+                constants::HF_DOWNLOAD_ASR_HINT
+            );
             return Ok(());
         }
     };
@@ -103,7 +111,7 @@ fn main() -> Result<()> {
     println!("\nTranscribing...");
     let result = {
         let _timer = Timer::new("transcription");
-        asr.transcribe(&audio_path, cli.max_tokens, cli.temperature)?
+        asr.transcribe(&audio_path, cli.max_tokens, cli.temperature, cli.top_p)?
     };
 
     asr::print_transcription(&result);

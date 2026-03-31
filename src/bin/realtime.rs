@@ -10,6 +10,7 @@ use std::process;
 use anyhow::Result;
 use clap::Parser;
 
+use vibe_rust::constants;
 use vibe_rust::realtime::{self, RealtimeConfig, RealtimeTts};
 use vibe_rust::utils::{self, Timer};
 
@@ -29,11 +30,11 @@ struct Cli {
     file: Option<PathBuf>,
 
     /// Voice preset name
-    #[arg(long, default_value = "carter")]
+    #[arg(long, default_value = constants::DEFAULT_SPEAKER)]
     speaker: String,
 
     /// Classifier-free guidance scale
-    #[arg(long, default_value_t = 1.5)]
+    #[arg(long, default_value_t = constants::DEFAULT_CFG_SCALE)]
     cfg_scale: f32,
 
     /// Output WAV path
@@ -54,16 +55,13 @@ fn main() -> Result<()> {
     } else if let Some(f) = cli.file {
         std::fs::read_to_string(&f)?
     } else {
-        "VibeVoice is an open-source family of frontier voice AI models from Microsoft. \
-         It supports automatic speech recognition, text-to-speech synthesis, and real-time \
-         streaming generation. This is a quick demo of the Realtime model."
-            .to_string()
+        constants::DEFAULT_TEXT.to_string()
     };
 
     println!(
         "Text ({} chars): {}",
         text.chars().count(),
-        utils::truncate_str(&text, 120)
+        utils::truncate_str(&text, constants::DEFAULT_TRUNCATE_LENGTH)
     );
 
     let config = RealtimeConfig {
@@ -80,6 +78,7 @@ fn main() -> Result<()> {
         Ok(t) => t,
         Err(e) => {
             eprintln!("\nCould not load model: {e}");
+            eprintln!("Download hint: {}", constants::HF_DOWNLOAD_ONNX_HINT);
             process::exit(1);
         }
     };
@@ -92,6 +91,11 @@ fn main() -> Result<()> {
     println!("\nAudio duration : {:.2}s", result.duration_secs);
     println!("Generation time: {:.2}s", result.generation_time_secs);
     println!("RTF            : {:.2}x", result.rtf);
+    if result.rtf < constants::RTF_REALTIME_THRESHOLD {
+        println!("(realtime)");
+    } else {
+        println!("(slower than realtime)");
+    }
     if let Some(p) = &result.output_path {
         let abs = std::fs::canonicalize(p).unwrap_or_else(|_| p.clone());
         println!("Saved to       : {}", abs.display());

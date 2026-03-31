@@ -11,10 +11,11 @@ use std::path::Path;
 
 use anyhow::Result;
 
+use crate::constants;
 use crate::utils::{self, Device};
 
 /// Default HuggingFace model id.
-pub const DEFAULT_MODEL: &str = "microsoft/VibeVoice-ASR";
+pub const DEFAULT_MODEL: &str = constants::ASR_MODEL_ID;
 
 /// A single transcription segment with speaker/timing info.
 #[derive(Debug, Clone)]
@@ -38,6 +39,8 @@ pub struct AsrConfig {
     pub model_path: String,
     pub device: Device,
     pub attn_impl: String,
+    /// Nucleus sampling threshold (1.0 = disabled, greedy).
+    pub top_p: f32,
 }
 
 impl Default for AsrConfig {
@@ -47,6 +50,7 @@ impl Default for AsrConfig {
             model_path: DEFAULT_MODEL.to_string(),
             device,
             attn_impl: utils::detect_attn_impl(device).to_string(),
+            top_p: constants::ASR_TOP_P,
         }
     }
 }
@@ -83,6 +87,7 @@ impl AsrModel {
         _audio: &Path,
         _max_new_tokens: u32,
         _temperature: f32,
+        _top_p: f32,
     ) -> Result<TranscriptionResult> {
         anyhow::bail!("ASR transcription not yet implemented")
     }
@@ -91,9 +96,9 @@ impl AsrModel {
 /// Pretty-print a transcription result to stdout.
 pub fn print_transcription(result: &TranscriptionResult) {
     println!("\n--- Raw transcription ---");
-    let display_len = result.raw_text.len().min(2000);
+    let display_len = result.raw_text.len().min(constants::MAX_DISPLAY_CHARS);
     print!("{}", &result.raw_text[..display_len]);
-    if result.raw_text.len() > 2000 {
+    if result.raw_text.len() > constants::MAX_DISPLAY_CHARS {
         println!("  ... ({} chars total)", result.raw_text.len());
     }
     println!();
@@ -103,7 +108,7 @@ pub fn print_transcription(result: &TranscriptionResult) {
             "\n--- Structured output ({} segments) ---",
             result.segments.len()
         );
-        for seg in result.segments.iter().take(60) {
+        for seg in result.segments.iter().take(constants::MAX_DISPLAY_SEGMENTS) {
             let start = utils::format_timestamp(seg.start_time);
             let end = utils::format_timestamp(seg.end_time);
             println!(
@@ -111,8 +116,11 @@ pub fn print_transcription(result: &TranscriptionResult) {
                 seg.speaker_id, seg.text
             );
         }
-        if result.segments.len() > 60 {
-            println!("  ... and {} more", result.segments.len() - 60);
+        if result.segments.len() > constants::MAX_DISPLAY_SEGMENTS {
+            println!(
+                "  ... and {} more",
+                result.segments.len() - constants::MAX_DISPLAY_SEGMENTS
+            );
         }
     }
 }

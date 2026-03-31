@@ -30,11 +30,12 @@ tasks:
       - cargo clippy -- -D warnings
 
   check:
-    desc: Run all quality checks (lint, format, build)
+    desc: Run all quality checks (lint, format, build, bench compile)
     cmds:
       - task: fmt:check
       - task: lint:check
       - task: build
+      - task: bench:check
 
   fix:
     desc: Auto-fix lint issues and reformat
@@ -141,6 +142,27 @@ tasks:
     cmds:
       - cargo test {{.CLI_ARGS}}
 
+  # ---------- Bench ----------
+  bench:
+    desc: Run all benchmarks
+    cmds:
+      - cargo bench {{.CLI_ARGS}}
+
+  bench:audio:
+    desc: Run audio I/O and resampling benchmarks
+    cmds:
+      - cargo bench --bench audio {{.CLI_ARGS}}
+
+  bench:dpm:
+    desc: Run DPM-Solver++ scheduler benchmarks
+    cmds:
+      - cargo bench --bench dpm_solver {{.CLI_ARGS}}
+
+  bench:check:
+    desc: Compile benchmarks without running them
+    cmds:
+      - cargo bench --no-run
+
   # ---------- Stats ----------
   loc:
     desc: Lines-of-code summary (tokei)
@@ -151,6 +173,75 @@ tasks:
     desc: Per-file lines-of-code breakdown (tokei)
     cmds:
       - tokei src/ examples/ --files
+
+  # ---------- Version ----------
+  version:
+    desc: Show current version from VERSION file
+    cmds:
+      - cat VERSION
+
+  version:patch:
+    desc: Bump patch version (0.2.0 -> 0.2.1), update VERSION + Cargo.toml
+    cmds:
+      - |
+        V=$(cat VERSION | tr -d '[:space:]')
+        MAJOR=$(echo "$V" | cut -d. -f1)
+        MINOR=$(echo "$V" | cut -d. -f2)
+        PATCH=$(echo "$V" | cut -d. -f3)
+        NEW="$MAJOR.$MINOR.$((PATCH + 1))"
+        printf '%s\n' "$NEW" > VERSION
+        sed -i "s/^version = \"$V\"/version = \"$NEW\"/" Cargo.toml
+        echo "$V -> $NEW"
+
+  version:minor:
+    desc: Bump minor version (0.2.1 -> 0.3.0), update VERSION + Cargo.toml
+    cmds:
+      - |
+        V=$(cat VERSION | tr -d '[:space:]')
+        MAJOR=$(echo "$V" | cut -d. -f1)
+        MINOR=$(echo "$V" | cut -d. -f2)
+        NEW="$MAJOR.$((MINOR + 1)).0"
+        printf '%s\n' "$NEW" > VERSION
+        sed -i "s/^version = \"$V\"/version = \"$NEW\"/" Cargo.toml
+        echo "$V -> $NEW"
+
+  version:major:
+    desc: Bump major version (0.2.0 -> 1.0.0), update VERSION + Cargo.toml
+    cmds:
+      - |
+        V=$(cat VERSION | tr -d '[:space:]')
+        MAJOR=$(echo "$V" | cut -d. -f1)
+        NEW="$((MAJOR + 1)).0.0"
+        printf '%s\n' "$NEW" > VERSION
+        sed -i "s/^version = \"$V\"/version = \"$NEW\"/" Cargo.toml
+        echo "$V -> $NEW"
+
+  version:tag:
+    desc: Create a git tag from the current VERSION (e.g. v0.2.0)
+    preconditions:
+      - sh: |
+          V=$(cat VERSION | tr -d '[:space:]')
+          CV=$(grep '^version = ' Cargo.toml | head -1 | sed 's/version = "\(.*\)"/\1/')
+          [ "$V" = "$CV" ]
+        msg: "VERSION ({{.V}}) and Cargo.toml are out of sync. Run 'task version:sync' first."
+    cmds:
+      - |
+        V=$(cat VERSION | tr -d '[:space:]')
+        git tag -a "v$V" -m "Release v$V"
+        echo "Tagged v$V"
+
+  version:sync:
+    desc: Sync Cargo.toml version to match the VERSION file
+    cmds:
+      - |
+        V=$(cat VERSION | tr -d '[:space:]')
+        CV=$(grep '^version = ' Cargo.toml | head -1 | sed 's/version = "\(.*\)"/\1/')
+        if [ "$V" = "$CV" ]; then
+          echo "Already in sync: $V"
+        else
+          sed -i "s/^version = \"$CV\"/version = \"$V\"/" Cargo.toml
+          echo "Cargo.toml: $CV -> $V"
+        fi
 
   # ---------- Project ----------
   clean:

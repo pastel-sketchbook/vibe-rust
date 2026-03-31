@@ -12,8 +12,10 @@
 
 use std::path::PathBuf;
 
+use crate::constants;
+
 /// Default HuggingFace model id.
-pub const MODEL_ID: &str = "microsoft/VibeVoice-1.5B";
+pub const MODEL_ID: &str = constants::TTS_MODEL_ID;
 
 const NOTE: &str = "\
 VibeVoice-TTS inference code was removed upstream due to misuse concerns.

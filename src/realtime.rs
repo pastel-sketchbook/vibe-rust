@@ -11,17 +11,18 @@ use std::time::Instant;
 
 use anyhow::{Context, Result};
 
+use crate::constants;
 use crate::onnx_backend::{self, OnnxConfig, OnnxSessions};
 use crate::utils::{self, Device};
 
 /// Default HuggingFace model id.
-pub const DEFAULT_MODEL: &str = "microsoft/VibeVoice-Realtime-0.5B";
+pub const DEFAULT_MODEL: &str = constants::REALTIME_MODEL_ID;
 
 /// Default ONNX model id (fp16 export with voice presets).
-pub const DEFAULT_ONNX_MODEL: &str = "nenad1002/microsoft-vibevoice-0.5B-onnx-fp16";
+pub const DEFAULT_ONNX_MODEL: &str = constants::REALTIME_ONNX_MODEL_ID;
 
 /// Output sample rate produced by the model.
-pub const OUTPUT_SR: u32 = 24_000;
+pub const OUTPUT_SR: u32 = constants::DEFAULT_SAMPLE_RATE;
 
 // ---------------------------------------------------------------------------
 // Voice-preset discovery (legacy .pt files)
@@ -32,10 +33,7 @@ pub const OUTPUT_SR: u32 = 24_000;
 /// Searches `demo/voices/streaming_model/` relative to the project root.
 pub fn list_voices(project_root: &Path) -> HashMap<String, PathBuf> {
     let mut voices = HashMap::new();
-    let voice_dir = project_root
-        .join("demo")
-        .join("voices")
-        .join("streaming_model");
+    let voice_dir = project_root.join(constants::LEGACY_VOICE_DIR);
     if voice_dir.is_dir()
         && let Ok(entries) = std::fs::read_dir(&voice_dir)
     {
@@ -239,18 +237,8 @@ impl RealtimeTts {
 // ---------------------------------------------------------------------------
 
 /// Check whether a directory looks like a valid ONNX model directory.
-///
-/// Requires at least the five `.onnx` files and `config.json`.
 fn is_valid_onnx_dir(dir: &Path) -> bool {
-    const REQUIRED: &[&str] = &[
-        "config.json",
-        "text_lm_kv.onnx",
-        "tts_lm_kv.onnx",
-        "diffusion_head.onnx",
-        "vocoder.onnx",
-        "acoustic_connector.onnx",
-    ];
-    REQUIRED.iter().all(|f| dir.join(f).exists())
+    OnnxSessions::is_valid_onnx_dir(dir)
 }
 
 /// Resolve the ONNX model directory.
@@ -305,7 +293,7 @@ fn resolve_onnx_model_dir(model_path: &str) -> Result<PathBuf> {
     }
 
     // 4. Check well-known local path
-    let local = PathBuf::from("models/vibevoice-onnx");
+    let local = PathBuf::from(constants::DEFAULT_LOCAL_MODEL_DIR);
     if local.is_dir() && is_valid_onnx_dir(&local) {
         return Ok(local);
     }
@@ -316,7 +304,8 @@ fn resolve_onnx_model_dir(model_path: &str) -> Result<PathBuf> {
          Download it with:\n\n  \
          hf download {DEFAULT_ONNX_MODEL}\n\n\
          Or download to a local directory:\n\n  \
-         hf download {DEFAULT_ONNX_MODEL} --local-dir models/vibevoice-onnx",
+         hf download {DEFAULT_ONNX_MODEL} --local-dir {}",
+        constants::DEFAULT_LOCAL_MODEL_DIR,
     )
 }
 

@@ -9,11 +9,12 @@
 //! Usage:
 //!     cargo run --example status
 
+use vibe_rust::constants;
 use vibe_rust::tts;
 
 fn main() {
     println!("VibeVoice-TTS status check");
-    println!("{}", "=".repeat(40));
+    println!("{}", "=".repeat(constants::BANNER_SEPARATOR_WIDTH));
     println!("Model : {}", tts::MODEL_ID);
     println!();
     tts::check_tts_status();
