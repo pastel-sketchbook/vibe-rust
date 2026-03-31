@@ -688,14 +688,14 @@ pub fn generate(
             tts_hidden = Some(tts_h);
         }
 
-        // Clone tts_hidden to avoid borrow issues in the loop below
-        let tts_h = match &tts_hidden {
-            Some(h_val) => h_val.clone(),
-            None => continue,
-        };
+        if tts_hidden.is_none() {
+            continue;
+        }
 
         for _si in 0..config.speech_window_size {
             // Extract last hidden state as condition [1, H]
+            // Must read from tts_hidden each iteration (it's updated in the feedback loop below).
+            let tts_h = tts_hidden.as_ref().unwrap();
             let last_idx = tts_h.shape()[1] - 1;
             let pos_cond_vec: Vec<f16> = (0..h).map(|j| tts_h[[0, last_idx, j]]).collect();
             let pos_cond = Array2::from_shape_vec((1, h), pos_cond_vec)?;

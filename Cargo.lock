@@ -2612,6 +2612,7 @@ dependencies = [
  "ort",
  "rand 0.10.0",
  "rand_distr",
+ "rayon",
  "serde",
  "serde_json",
  "symphonia",
