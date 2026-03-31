@@ -1,8 +1,11 @@
-//! VibeVoice-Realtime TTS CLI — streaming synthesis demo.
+//! `VibeVoice`-Realtime TTS CLI — streaming synthesis demo.
 //!
 //! Usage:
-//!     cargo run --bin vibe-realtime -- --text "Hello from VibeVoice!"
-//!     cargo run --bin vibe-realtime -- --file data/text/vibevoice_intro.txt
+//!
+//! ```sh
+//! cargo run --bin vibe-realtime -- --text "Hello from VibeVoice!"
+//! cargo run --bin vibe-realtime -- --file data/text/vibevoice_intro.txt
+//! ```
 
 use std::path::PathBuf;
 use std::process;

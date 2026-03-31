@@ -313,7 +313,7 @@ fn main() -> Result<()> {
 
             // Grab whichever worker is free (round-robin with blocking lock)
             let worker = &pool[i % pool.len()];
-            let mut tts = worker.lock().unwrap();
+            let mut tts = worker.lock().expect("worker mutex poisoned");
 
             let result = tts.synthesize(seg.text, &cli.speaker, cli.cfg_scale, Some(&seg_file))?;
 

@@ -89,11 +89,8 @@ pub fn detect_dtype(device: Device) -> DType {
 
 /// Attention implementation name suitable for the given device.
 #[must_use]
-pub fn detect_attn_impl(device: Device) -> &'static str {
-    match device {
-        Device::Cuda => "sdpa", // flash_attention_2 if available at runtime
-        _ => "sdpa",
-    }
+pub fn detect_attn_impl(_device: Device) -> &'static str {
+    "sdpa"
 }
 
 // ---------------------------------------------------------------------------
@@ -113,13 +110,21 @@ impl AudioData {
     /// Duration in seconds.
     #[must_use]
     pub fn duration_secs(&self) -> f64 {
-        self.samples.len() as f64 / self.sample_rate as f64
+        // Sample counts and common sample rates fit in f64 without meaningful loss.
+        #[allow(clippy::cast_precision_loss)]
+        let duration = self.samples.len() as f64 / f64::from(self.sample_rate);
+        duration
     }
 }
 
 /// Load an audio file (WAV, MP3, or PCM) and return audio samples + sample rate.
 ///
 /// WAV files are decoded via `hound` for speed. Other formats use `symphonia`.
+///
+/// # Errors
+///
+/// Returns an error if the file cannot be opened, decoded, or contains no
+/// supported audio tracks.
 pub fn load_audio(path: &Path) -> Result<AudioData> {
     load_audio_with_sr(path, None)
 }
@@ -128,6 +133,10 @@ pub fn load_audio(path: &Path) -> Result<AudioData> {
 ///
 /// If `target_sr` is `None`, the audio is returned at its native sample rate.
 /// WAV files are decoded via `hound`; MP3 and other formats use `symphonia`.
+///
+/// # Errors
+///
+/// Returns an error if the file cannot be opened, decoded, or resampling fails.
 pub fn load_audio_with_sr(path: &Path, target_sr: Option<u32>) -> Result<AudioData> {
     let extension = path
         .extension()
@@ -177,18 +186,24 @@ fn load_wav_hound(path: &Path) -> Result<AudioData> {
             .collect::<std::result::Result<Vec<_>, _>>()
             .context("failed to read float samples")?,
         hound::SampleFormat::Int => {
+            // bits_per_sample ≤ 32 for WAV, so max_val fits precisely in f32 up to 24-bit.
+            #[allow(clippy::cast_precision_loss)]
             let max_val = (1i64 << (spec.bits_per_sample - 1)) as f32;
             reader
                 .into_samples::<i32>()
                 .collect::<std::result::Result<Vec<_>, _>>()
                 .context("failed to read int samples")?
                 .into_iter()
-                .map(|s| s as f32 / max_val)
+                .map(|s| {
+                    #[allow(clippy::cast_precision_loss)] // audio sample values are small
+                    let val = s as f32 / max_val;
+                    val
+                })
                 .collect()
         }
     };
 
-    let mono = mix_to_mono(&samples, spec.channels as usize);
+    let mono = mix_to_mono(&samples, usize::from(spec.channels));
 
     Ok(AudioData {
         samples: mono,
@@ -198,20 +213,23 @@ fn load_wav_hound(path: &Path) -> Result<AudioData> {
 
 /// Load audio using symphonia (supports MP3, PCM, and other formats).
 fn load_audio_symphonia(path: &Path) -> Result<AudioData> {
-    use symphonia::core::audio::{AudioBufferRef, Signal};
     use symphonia::core::codecs::{CODEC_TYPE_NULL, DecoderOptions};
-    use symphonia::core::conv::FromSample;
 
     let file =
         std::fs::File::open(path).with_context(|| format!("failed to open {}", path.display()))?;
-    let source = symphonia::core::io::MediaSourceStream::new(Box::new(file), Default::default());
+    let source = symphonia::core::io::MediaSourceStream::new(
+        Box::new(file),
+        symphonia::core::io::MediaSourceStreamOptions::default(),
+    );
     let mut hint = symphonia::core::probe::Hint::new();
     if let Some(ext) = path.extension() {
         hint.with_extension(&ext.to_string_lossy());
     }
 
+    let format_opts = symphonia::core::formats::FormatOptions::default();
+    let metadata_opts = symphonia::core::meta::MetadataOptions::default();
     let mut probed = symphonia::default::get_probe()
-        .format(&hint, source, &Default::default(), &Default::default())
+        .format(&hint, source, &format_opts, &metadata_opts)
         .context("failed to probe audio format")?;
 
     let track = probed
@@ -221,7 +239,7 @@ fn load_audio_symphonia(path: &Path) -> Result<AudioData> {
         .find(|t| t.codec_params.codec != CODEC_TYPE_NULL)
         .context("no supported audio tracks found")?;
 
-    let mut decoder = symphonia::default::get_codecs()
+    let mut audio_decoder = symphonia::default::get_codecs()
         .make(&track.codec_params, &DecoderOptions::default())
         .context("failed to create decoder")?;
 
@@ -230,8 +248,6 @@ fn load_audio_symphonia(path: &Path) -> Result<AudioData> {
         .sample_rate
         .context("unknown sample rate")?;
 
-    // Note: mono mixing is done per-frame inside the decode loop below,
-    // so `samples` is already mono regardless of the channel count.
     let mut samples = Vec::new();
 
     while let Ok(packet) = probed.format.next_packet() {
@@ -239,116 +255,76 @@ fn load_audio_symphonia(path: &Path) -> Result<AudioData> {
             probed.format.metadata().pop();
         }
 
-        let decoded = decoder.decode(&packet)?;
-
-        match decoded {
-            AudioBufferRef::F32(ref ab) => {
-                let n_ch = ab.spec().channels.count();
-                for frame_idx in 0..ab.frames() {
-                    let mut sum = 0.0f32;
-                    for ch in 0..n_ch {
-                        sum += ab.chan(ch)[frame_idx];
-                    }
-                    samples.push(sum / n_ch as f32);
-                }
-            }
-            AudioBufferRef::F64(ref ab) => {
-                let n_ch = ab.spec().channels.count();
-                for frame_idx in 0..ab.frames() {
-                    let mut sum = 0.0f64;
-                    for ch in 0..n_ch {
-                        sum += ab.chan(ch)[frame_idx];
-                    }
-                    samples.push((sum / n_ch as f64) as f32);
-                }
-            }
-            AudioBufferRef::S16(ref ab) => {
-                let n_ch = ab.spec().channels.count();
-                for frame_idx in 0..ab.frames() {
-                    let mut sum = 0.0f32;
-                    for ch in 0..n_ch {
-                        sum += f32::from_sample(ab.chan(ch)[frame_idx]);
-                    }
-                    samples.push(sum / n_ch as f32);
-                }
-            }
-            AudioBufferRef::S32(ref ab) => {
-                let n_ch = ab.spec().channels.count();
-                for frame_idx in 0..ab.frames() {
-                    let mut sum = 0.0f32;
-                    for ch in 0..n_ch {
-                        sum += f32::from_sample(ab.chan(ch)[frame_idx]);
-                    }
-                    samples.push(sum / n_ch as f32);
-                }
-            }
-            AudioBufferRef::S8(ref ab) => {
-                let n_ch = ab.spec().channels.count();
-                for frame_idx in 0..ab.frames() {
-                    let mut sum = 0.0f32;
-                    for ch in 0..n_ch {
-                        sum += f32::from_sample(ab.chan(ch)[frame_idx]);
-                    }
-                    samples.push(sum / n_ch as f32);
-                }
-            }
-            AudioBufferRef::U8(ref ab) => {
-                let n_ch = ab.spec().channels.count();
-                for frame_idx in 0..ab.frames() {
-                    let mut sum = 0.0f32;
-                    for ch in 0..n_ch {
-                        sum += f32::from_sample(ab.chan(ch)[frame_idx]);
-                    }
-                    samples.push(sum / n_ch as f32);
-                }
-            }
-            AudioBufferRef::U16(ref ab) => {
-                let n_ch = ab.spec().channels.count();
-                for frame_idx in 0..ab.frames() {
-                    let mut sum = 0.0f32;
-                    for ch in 0..n_ch {
-                        sum += f32::from_sample(ab.chan(ch)[frame_idx]);
-                    }
-                    samples.push(sum / n_ch as f32);
-                }
-            }
-            AudioBufferRef::U32(ref ab) => {
-                let n_ch = ab.spec().channels.count();
-                for frame_idx in 0..ab.frames() {
-                    let mut sum = 0.0f32;
-                    for ch in 0..n_ch {
-                        sum += f32::from_sample(ab.chan(ch)[frame_idx]);
-                    }
-                    samples.push(sum / n_ch as f32);
-                }
-            }
-            AudioBufferRef::U24(ref ab) => {
-                let n_ch = ab.spec().channels.count();
-                for frame_idx in 0..ab.frames() {
-                    let mut sum = 0.0f32;
-                    for ch in 0..n_ch {
-                        sum += f32::from_sample(ab.chan(ch)[frame_idx]);
-                    }
-                    samples.push(sum / n_ch as f32);
-                }
-            }
-            AudioBufferRef::S24(ref ab) => {
-                let n_ch = ab.spec().channels.count();
-                for frame_idx in 0..ab.frames() {
-                    let mut sum = 0.0f32;
-                    for ch in 0..n_ch {
-                        sum += f32::from_sample(ab.chan(ch)[frame_idx]);
-                    }
-                    samples.push(sum / n_ch as f32);
-                }
-            }
-        }
+        let buf = audio_decoder.decode(&packet)?;
+        decode_frame_to_mono(&buf, &mut samples);
     }
 
     Ok(AudioData {
         samples,
         sample_rate,
     })
+}
+
+/// Decode a single audio frame to mono f32 samples, appending to `out`.
+///
+/// Averages all channels per frame. Supports all symphonia sample formats.
+fn decode_frame_to_mono(buf: &symphonia::core::audio::AudioBufferRef<'_>, out: &mut Vec<f32>) {
+    use symphonia::core::audio::{AudioBufferRef, Signal};
+    use symphonia::core::conv::FromSample;
+
+    /// Mix one typed buffer to mono and append to `out`.
+    macro_rules! mix_mono {
+        ($ab:expr, $out:expr, f32) => {{
+            let n_ch = $ab.spec().channels.count();
+            for frame_idx in 0..$ab.frames() {
+                let mut sum = 0.0_f32;
+                for ch in 0..n_ch {
+                    sum += $ab.chan(ch)[frame_idx];
+                }
+                // Channel count is always small (≤32), so precision loss is negligible.
+                #[allow(clippy::cast_precision_loss)]
+                $out.push(sum / n_ch as f32);
+            }
+        }};
+        ($ab:expr, $out:expr, f64) => {{
+            let n_ch = $ab.spec().channels.count();
+            for frame_idx in 0..$ab.frames() {
+                let mut sum = 0.0_f64;
+                for ch in 0..n_ch {
+                    sum += $ab.chan(ch)[frame_idx];
+                }
+                // Channel count is always small (≤32), so precision loss is negligible.
+                #[allow(clippy::cast_precision_loss, clippy::cast_possible_truncation)]
+                let mono = (sum / n_ch as f64) as f32;
+                $out.push(mono);
+            }
+        }};
+        ($ab:expr, $out:expr, from_sample) => {{
+            let n_ch = $ab.spec().channels.count();
+            for frame_idx in 0..$ab.frames() {
+                let mut sum = 0.0_f32;
+                for ch in 0..n_ch {
+                    sum += f32::from_sample($ab.chan(ch)[frame_idx]);
+                }
+                // Channel count is always small (≤32), so precision loss is negligible.
+                #[allow(clippy::cast_precision_loss)]
+                $out.push(sum / n_ch as f32);
+            }
+        }};
+    }
+
+    match *buf {
+        AudioBufferRef::F32(ref ab) => mix_mono!(ab, out, f32),
+        AudioBufferRef::F64(ref ab) => mix_mono!(ab, out, f64),
+        AudioBufferRef::S16(ref ab) => mix_mono!(ab, out, from_sample),
+        AudioBufferRef::S32(ref ab) => mix_mono!(ab, out, from_sample),
+        AudioBufferRef::S8(ref ab) => mix_mono!(ab, out, from_sample),
+        AudioBufferRef::U8(ref ab) => mix_mono!(ab, out, from_sample),
+        AudioBufferRef::U16(ref ab) => mix_mono!(ab, out, from_sample),
+        AudioBufferRef::U32(ref ab) => mix_mono!(ab, out, from_sample),
+        AudioBufferRef::U24(ref ab) => mix_mono!(ab, out, from_sample),
+        AudioBufferRef::S24(ref ab) => mix_mono!(ab, out, from_sample),
+    }
 }
 
 /// Mix multi-channel interleaved samples to mono by averaging channels.
@@ -358,13 +334,22 @@ fn mix_to_mono(samples: &[f32], channels: usize) -> Vec<f32> {
     }
     samples
         .chunks(channels)
-        .map(|frame| frame.iter().sum::<f32>() / channels as f32)
+        // Channel count is always small (≤32), so precision loss is negligible.
+        .map(|frame| {
+            #[allow(clippy::cast_precision_loss)]
+            let mono = frame.iter().sum::<f32>() / channels as f32;
+            mono
+        })
         .collect()
 }
 
 /// Resample audio from `from_sr` to `to_sr` using FFT-based resampling.
 ///
 /// Uses `rubato` with a high-quality FFT resampler for audio-grade resampling.
+///
+/// # Errors
+///
+/// Returns an error if the resampler cannot be created or resampling fails.
 pub fn resample(samples: &[f32], from_sr: u32, to_sr: u32) -> Result<Vec<f32>> {
     use audioadapter_buffers::direct::SequentialSliceOfVecs;
     use rubato::{Fft, FixedSync, Resampler};
@@ -398,6 +383,11 @@ pub fn resample(samples: &[f32], from_sr: u32, to_sr: u32) -> Result<Vec<f32>> {
 }
 
 /// Write mono audio samples to a WAV file, creating parent directories as needed.
+///
+/// # Errors
+///
+/// Returns an error if the directory cannot be created or the WAV file
+/// cannot be written.
 pub fn save_audio(samples: &[f32], path: &Path, sample_rate: u32) -> Result<PathBuf> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)
@@ -458,7 +448,13 @@ impl Drop for Timer {
 // ---------------------------------------------------------------------------
 
 /// Generate a short sine-wave WAV file for smoke-testing pipelines.
+///
+/// # Errors
+///
+/// Returns an error if the WAV file cannot be written.
 #[must_use = "consider saving the generated test tone"]
+#[allow(clippy::cast_precision_loss)] // sample_rate and sample index fit in f32 for audio
+#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)] // product is always positive and fits
 pub fn generate_test_tone(
     path: &Path,
     sample_rate: u32,
@@ -477,6 +473,10 @@ pub fn generate_test_tone(
 }
 
 /// Generate a test tone with default parameters (3s, 440 Hz, 24 kHz).
+///
+/// # Errors
+///
+/// Returns an error if the WAV file cannot be written.
 #[must_use = "consider saving the generated test tone"]
 pub fn generate_test_tone_default() -> Result<PathBuf> {
     generate_test_tone(
@@ -492,6 +492,8 @@ pub fn generate_test_tone_default() -> Result<PathBuf> {
 // ---------------------------------------------------------------------------
 
 /// Format seconds as `HH:MM:SS.mmm`.
+#[must_use]
+#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)] // hour/minute values always fit in u32
 pub fn format_timestamp(seconds: f64) -> String {
     let h = (seconds / 3600.0) as u32;
     let m = ((seconds % 3600.0) / 60.0) as u32;
@@ -502,6 +504,7 @@ pub fn format_timestamp(seconds: f64) -> String {
 /// Truncate a string to at most `max_chars` characters, appending `...` if truncated.
 ///
 /// Unlike byte-based slicing this is safe for multi-byte UTF-8 text (e.g. CJK, emoji).
+#[must_use]
 pub fn truncate_str(s: &str, max_chars: usize) -> String {
     match s.char_indices().nth(max_chars) {
         Some((byte_idx, _)) => format!("{}...", &s[..byte_idx]),

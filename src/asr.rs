@@ -3,7 +3,7 @@
 //! Rust port of `vibe_demo/asr.py`.
 //!
 //! **Status:** Scaffold only. The actual model inference requires a Rust ML
-//! runtime (candle or ort/ONNX) and VibeVoice model support. This module
+//! runtime (candle or ort/ONNX) and `VibeVoice` model support. This module
 //! defines the public API surface and data types so downstream code can be
 //! written against it.
 
@@ -14,7 +14,7 @@ use anyhow::Result;
 use crate::constants;
 use crate::utils::{self, Device};
 
-/// Default HuggingFace model id.
+/// Default `HuggingFace` model ID.
 pub const DEFAULT_MODEL: &str = constants::ASR_MODEL_ID;
 
 /// A single transcription segment with speaker/timing info.
@@ -68,7 +68,11 @@ impl AsrModel {
     /// Load the ASR model.
     ///
     /// **Not yet implemented** — returns an error describing the missing backend.
-    pub fn load(config: AsrConfig) -> Result<Self> {
+    ///
+    /// # Errors
+    ///
+    /// Always returns an error until a Rust ML inference backend is integrated.
+    pub fn load(config: &AsrConfig) -> Result<Self> {
         println!("Loading VibeVoice-ASR from {}", config.model_path);
         println!("  device={}  attn={}", config.device, config.attn_impl);
 
@@ -82,6 +86,10 @@ impl AsrModel {
     /// Transcribe a single audio file.
     ///
     /// **Not yet implemented.**
+    ///
+    /// # Errors
+    ///
+    /// Always returns an error until ASR inference is implemented.
     pub fn transcribe(
         &self,
         _audio: &Path,

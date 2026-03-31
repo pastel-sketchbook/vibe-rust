@@ -1,11 +1,11 @@
 //! ONNX session management.
 //!
 //! Manages the 5 neural network components:
-//! - text_lm: Text language model with KV-cache
-//! - tts_lm: TTS language model with KV-cache
-//! - diffusion_head: Diffusion model for speech synthesis
+//! - `text_lm`: Text language model with KV-cache
+//! - `tts_lm`: TTS language model with KV-cache
+//! - `diffusion_head`: Diffusion model for speech synthesis
 //! - vocoder: Neural vocoder for waveform generation
-//! - acoustic_connector: Connects acoustic features to TTS LM
+//! - `acoustic_connector`: Connects acoustic features to TTS LM
 
 use std::path::Path;
 
@@ -24,7 +24,7 @@ pub const REQUIRED_ONNX_FILES: &[&str] = &[
     "acoustic_connector.onnx",
 ];
 
-/// Collection of ONNX sessions for the VibeVoice-Realtime model.
+/// Collection of ONNX sessions for the `VibeVoice`-Realtime model.
 pub struct OnnxSessions {
     pub text_lm: Session,
     pub tts_lm: Session,
@@ -49,20 +49,29 @@ impl Default for OnnxSessionsBuilder {
 }
 
 impl OnnxSessionsBuilder {
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
+    #[must_use]
     pub fn with_optimization_level(mut self, level: GraphOptimizationLevel) -> Self {
         self.optimization_level = level;
         self
     }
 
+    #[must_use]
     pub fn with_intra_threads(mut self, threads: usize) -> Self {
         self.intra_threads = threads;
         self
     }
 
+    /// Build all ONNX sessions from the given model directory.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if any required ONNX model file is missing or
+    /// session creation fails.
     pub fn build(self, model_dir: &Path) -> Result<OnnxSessions> {
         let load = |name: &str| -> Result<Session> {
             let path = model_dir.join(format!("{name}.onnx"));
@@ -90,11 +99,17 @@ impl OnnxSessionsBuilder {
 
 impl OnnxSessions {
     /// Load all ONNX sessions from a model directory.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if any required ONNX model file is missing or
+    /// session creation fails.
     pub fn load(model_dir: &Path) -> Result<Self> {
         OnnxSessionsBuilder::default().build(model_dir)
     }
 
     /// Check whether a directory looks like a valid ONNX model directory.
+    #[must_use]
     pub fn is_valid_onnx_dir(dir: &Path) -> bool {
         let mut files = vec!["config.json"];
         files.extend(REQUIRED_ONNX_FILES.iter());

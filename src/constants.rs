@@ -4,7 +4,7 @@
 // Audio constants
 // ---------------------------------------------------------------------------
 
-/// Default output sample rate for VibeVoice models.
+/// Default output sample rate for `VibeVoice` models.
 pub const DEFAULT_SAMPLE_RATE: u32 = 24_000;
 
 /// WAV output channels (mono).
@@ -103,10 +103,10 @@ pub const SAFETY_STOP_MULTIPLIER: usize = 3;
 /// Number of diffusion steps in DPM-Solver++.
 pub const DPM_SOLVER_STEPS: usize = 5;
 
-/// Minimum sigma_t value before lambda is clamped.
+/// Minimum `sigma_t` value before lambda is clamped.
 pub const SIGMA_T_MIN: f64 = 1e-10;
 
-/// Maximum lambda value (clamped when sigma_t is near zero).
+/// Maximum lambda value (clamped when `sigma_t` is near zero).
 pub const LAMBDA_MAX: f64 = 20.0;
 
 /// Step indices that use first-order DPM-Solver++ steps.
@@ -129,16 +129,16 @@ pub const TEXT_SUFFIX_NEWLINE: &str = "\n";
 // Model IDs
 // ---------------------------------------------------------------------------
 
-/// Default HuggingFace model id for VibeVoice-ASR.
+/// Default `HuggingFace` model id for `VibeVoice`-ASR.
 pub const ASR_MODEL_ID: &str = "microsoft/VibeVoice-ASR";
 
-/// Default HuggingFace model id for VibeVoice-Realtime.
+/// Default `HuggingFace` model id for `VibeVoice`-Realtime.
 pub const REALTIME_MODEL_ID: &str = "microsoft/VibeVoice-Realtime-0.5B";
 
 /// Default ONNX model id (fp16 export with voice presets).
 pub const REALTIME_ONNX_MODEL_ID: &str = "nenad1002/microsoft-vibevoice-0.5B-onnx-fp16";
 
-/// Default HuggingFace model id for VibeVoice-TTS.
+/// Default `HuggingFace` model id for `VibeVoice`-TTS.
 pub const TTS_MODEL_ID: &str = "microsoft/VibeVoice-1.5B";
 
 // ---------------------------------------------------------------------------

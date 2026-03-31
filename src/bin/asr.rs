@@ -43,21 +43,18 @@ struct Cli {
 }
 
 fn resolve_audio(path: Option<PathBuf>) -> PathBuf {
-    match path {
-        Some(p) => {
-            if !p.exists() {
-                eprintln!("Error: audio file not found: {}", p.display());
-                process::exit(1);
-            }
-            p
+    if let Some(p) = path {
+        if !p.exists() {
+            eprintln!("Error: audio file not found: {}", p.display());
+            process::exit(1);
         }
-        None => {
-            println!("No --audio provided; generating a 3s test tone ...");
-            utils::generate_test_tone_default().unwrap_or_else(|e| {
-                eprintln!("Failed to generate test tone: {e}");
-                process::exit(1);
-            })
-        }
+        p
+    } else {
+        println!("No --audio provided; generating a 3s test tone ...");
+        utils::generate_test_tone_default().unwrap_or_else(|e| {
+            eprintln!("Failed to generate test tone: {e}");
+            process::exit(1);
+        })
     }
 }
 
@@ -83,7 +80,7 @@ fn main() -> Result<()> {
         ..Default::default()
     };
 
-    let asr = match AsrModel::load(config) {
+    let asr = match AsrModel::load(&config) {
         Ok(m) => m,
         Err(e) => {
             eprintln!("\nCould not load ASR model: {e}");

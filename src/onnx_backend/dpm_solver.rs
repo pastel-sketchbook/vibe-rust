@@ -1,6 +1,6 @@
-//! DPM-Solver++ diffusion scheduler.
+//! `DPM-Solver++` diffusion scheduler.
 //!
-//! Pure Rust implementation matching the PyTorch reference.
+//! Pure Rust implementation matching the `PyTorch` reference.
 //! Maintains 2 parallel denoising trajectories (positive + negative) for
 //! classifier-free guidance.
 
@@ -14,13 +14,15 @@ use rand_distr::StandardNormal;
 use crate::constants;
 use crate::onnx_backend::config::DpmSchedule;
 
-/// Convert sigma to alpha and sigma_t.
+/// Convert sigma to alpha and `sigma_t`.
+#[must_use]
 pub fn sigma_to_alpha_sigma(sigma: f64) -> (f64, f64) {
     let alpha = 1.0 / (1.0 + sigma * sigma).sqrt();
     (alpha, sigma * alpha)
 }
 
 /// Convert sigma to lambda (log-SNR).
+#[must_use]
 pub fn sigma_to_lambda(sigma: f64) -> f64 {
     let (alpha, sigma_t) = sigma_to_alpha_sigma(sigma);
     if sigma_t < constants::SIGMA_T_MIN {
@@ -29,7 +31,12 @@ pub fn sigma_to_lambda(sigma: f64) -> f64 {
     (alpha / sigma_t).ln()
 }
 
-/// Sample one speech latent via DPM-Solver++ with classifier-free guidance.
+/// Sample one speech latent via `DPM-Solver++` with classifier-free guidance.
+///
+/// # Errors
+///
+/// Returns an error if the schedule has too few entries or the diffusion
+/// model session fails.
 pub fn sample_speech_token(
     diff_sess: &mut Session,
     schedule: &DpmSchedule,
@@ -57,7 +64,8 @@ pub fn sample_speech_token(
         .map(|_| rng.sample::<f64, _>(StandardNormal))
         .collect();
 
-    let mut sample = noise.clone();
+    // `noise` is not used after this point — move instead of clone.
+    let mut sample = noise;
     let mut m_list: Vec<Vec<f64>> = Vec::new();
 
     for step_idx in 0..constants::DPM_SOLVER_STEPS {
@@ -66,6 +74,7 @@ pub fn sample_speech_token(
             .map(|&v| f16::from_f64(v))
             .collect();
         let half_arr = Array2::from_shape_vec((1, latent_dim), half)?;
+        #[allow(clippy::cast_precision_loss)] // i64 timestep values are small integers
         let t_val = f16::from_f64(schedule.timesteps[step_idx] as f64);
         let t_arr = ndarray::Array1::from_vec(vec![t_val]);
 
@@ -122,10 +131,12 @@ pub fn sample_speech_token(
         }
     }
 
+    // Truncate to latent_dim: precision loss from f64→f32 is acceptable for latents.
+    #[allow(clippy::cast_possible_truncation)]
     Ok(sample[..latent_dim].iter().map(|&v| v as f32).collect())
 }
 
-/// Run diffusion head (single step): noisy_latent + timestep + condition → v_prediction.
+/// Run diffusion head (single step): `noisy_latent` + timestep + condition → `v_prediction`.
 fn run_diffusion(
     sess: &mut Session,
     noisy: &Array2<f16>,
@@ -138,6 +149,8 @@ fn run_diffusion(
         "condition" => ort::value::Tensor::from_array(condition.clone())?
     ])?;
     let (shape, data) = outputs[0].try_extract_tensor::<f16>()?;
+    // ONNX shape dimensions are i64; values are always small non-negative integers.
+    #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
     Ok(Array2::from_shape_vec(
         (shape[0] as usize, shape[1] as usize),
         data.to_vec(),

@@ -94,7 +94,7 @@ fn main() -> Result<()> {
         ..Default::default()
     };
 
-    let asr = match AsrModel::load(config) {
+    let asr = match AsrModel::load(&config) {
         Ok(m) => m,
         Err(e) => {
             eprintln!("\nCould not load ASR model: {e}");

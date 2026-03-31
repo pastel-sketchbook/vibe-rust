@@ -1,4 +1,4 @@
-//! VibeVoice-Realtime: streaming text-to-speech with ~200ms first-chunk latency.
+//! `VibeVoice`-Realtime: streaming text-to-speech with ~200ms first-chunk latency.
 //!
 //! Rust port of `vibe_demo/realtime.py`.
 //!
@@ -15,10 +15,10 @@ use crate::constants;
 use crate::onnx_backend::{self, OnnxConfig, OnnxSessions};
 use crate::utils::{self, Device};
 
-/// Default HuggingFace model id.
+/// Default `HuggingFace` model ID.
 pub const DEFAULT_MODEL: &str = constants::REALTIME_MODEL_ID;
 
-/// Default ONNX model id (fp16 export with voice presets).
+/// Default ONNX model ID (fp16 export with voice presets).
 pub const DEFAULT_ONNX_MODEL: &str = constants::REALTIME_ONNX_MODEL_ID;
 
 /// Output sample rate produced by the model.
@@ -31,6 +31,7 @@ pub const OUTPUT_SR: u32 = constants::DEFAULT_SAMPLE_RATE;
 /// Find voice preset `.pt` files in the project or upstream package.
 ///
 /// Searches `demo/voices/streaming_model/` relative to the project root.
+#[must_use]
 pub fn list_voices(project_root: &Path) -> HashMap<String, PathBuf> {
     let mut voices = HashMap::new();
     let voice_dir = project_root.join(constants::LEGACY_VOICE_DIR);
@@ -62,7 +63,7 @@ pub struct SynthesisResult {
     pub duration_secs: f64,
     /// Wall-clock time for generation in seconds.
     pub generation_time_secs: f64,
-    /// Real-time factor (generation_time / duration).
+    /// Real-time factor (`generation_time` / duration).
     pub rtf: f64,
     /// Path where audio was saved, if any.
     pub output_path: Option<PathBuf>,
@@ -109,8 +110,13 @@ pub struct RealtimeTts {
 impl RealtimeTts {
     /// Load the Realtime TTS model from an ONNX model directory.
     ///
-    /// The `onnx_model_dir` should contain the ONNX files, tokenizer.json,
-    /// config.json, schedule.json, and .npz voice presets.
+    /// The `onnx_model_dir` should contain the ONNX files, `tokenizer.json`,
+    /// `config.json`, `schedule.json`, and `.npz` voice presets.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the model directory cannot be resolved, required
+    /// files are missing, or ONNX sessions fail to load.
     pub fn load(config: RealtimeConfig, project_root: &Path) -> Result<Self> {
         println!("Loading VibeVoice-Realtime from {}", config.model_path);
         println!("  device={}  attn={}", config.device, config.attn_impl);
@@ -119,8 +125,8 @@ impl RealtimeTts {
         if voices.is_empty() {
             println!("  no legacy .pt voice presets found");
         } else {
-            let mut names: Vec<_> = voices.keys().map(|s| s.as_str()).collect();
-            names.sort();
+            let mut names: Vec<_> = voices.keys().map(String::as_str).collect();
+            names.sort_unstable();
             println!("  voices: {}", names.join(", "));
         }
 
@@ -133,14 +139,14 @@ impl RealtimeTts {
             let cfg_path = model_dir.join("config.json");
             let data = std::fs::read_to_string(&cfg_path)
                 .with_context(|| format!("Missing config.json in {}", model_dir.display()))?;
-            serde_json::from_str(&data)?
+            serde_json::from_str(&data).context("invalid config.json")?
         };
 
         let schedule: onnx_backend::DpmSchedule = {
             let sched_path = model_dir.join("schedule.json");
             let data = std::fs::read_to_string(&sched_path)
                 .with_context(|| format!("Missing schedule.json in {}", model_dir.display()))?;
-            serde_json::from_str(&data)?
+            serde_json::from_str(&data).context("invalid schedule.json")?
         };
 
         // Load tokenizer
@@ -181,6 +187,10 @@ impl RealtimeTts {
     ///
     /// The `speaker` name is matched against `.npz` voice presets in the model
     /// directory using case-insensitive substring matching.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the voice preset cannot be loaded or generation fails.
     pub fn synthesize(
         &mut self,
         text: &str,
@@ -201,13 +211,15 @@ impl RealtimeTts {
             &self.schedule,
             &voice,
             text,
-            cfg_scale as f64,
+            f64::from(cfg_scale),
         )?;
 
         let gen_time = start.elapsed().as_secs_f64();
 
         let audio = audio.unwrap_or_default();
-        let duration = audio.len() as f64 / OUTPUT_SR as f64;
+        // Audio sample counts and sample rate (24 kHz) fit in f64 without meaningful loss.
+        #[allow(clippy::cast_precision_loss)]
+        let duration = audio.len() as f64 / f64::from(OUTPUT_SR);
         let rtf = if duration > 0.0 {
             gen_time / duration
         } else {
@@ -309,7 +321,7 @@ fn resolve_onnx_model_dir(model_path: &str) -> Result<PathBuf> {
     )
 }
 
-/// Return HuggingFace cache directories to search.
+/// Return `HuggingFace` cache directories to search.
 fn dirs_hf_cache() -> Vec<PathBuf> {
     let mut dirs = Vec::new();
 

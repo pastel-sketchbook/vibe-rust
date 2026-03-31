@@ -12,18 +12,23 @@ use anyhow::{Context, Result};
 use half::f16;
 use ndarray::{ArrayD, IxDyn};
 
-/// KV cache as flat HashMap of named f16 arrays.
+/// KV cache as flat `HashMap` of named f16 arrays.
 pub type KvCache = HashMap<String, ArrayD<f16>>;
 
 /// Load a voice preset from an `.npz` file.
+///
+/// # Errors
+///
+/// Returns an error if the file cannot be opened, entries cannot be read,
+/// or any `.npy` array fails to parse.
 pub fn load_voice_preset(path: &Path) -> Result<KvCache> {
     let file = std::fs::File::open(path)
         .with_context(|| format!("Failed to open voice preset: {}", path.display()))?;
-    let mut zip = zip::ZipArchive::new(file)?;
+    let mut zip = zip::ZipArchive::new(file).context("invalid zip archive")?;
     let mut cache = KvCache::new();
 
     for i in 0..zip.len() {
-        let mut entry = zip.by_index(i)?;
+        let mut entry = zip.by_index(i).context("failed to read zip entry")?;
         let name = entry
             .name()
             .strip_suffix(".npy")
@@ -59,7 +64,7 @@ fn parse_npy_f16(buf: &[u8]) -> Result<ArrayD<f16>> {
     let header_len: usize;
 
     if major == 1 {
-        header_len = u16::from_le_bytes([buf[8], buf[9]]) as usize;
+        header_len = usize::from(u16::from_le_bytes([buf[8], buf[9]]));
         header_len_offset = 10;
     } else {
         anyhow::ensure!(buf.len() >= 12, "NPY v2+ buffer too short");
@@ -133,6 +138,7 @@ fn parse_npy_shape(header: &str) -> Option<Vec<usize>> {
 }
 
 /// Extract LM-style KV cache from voice preset with a given prefix.
+#[must_use]
 pub fn extract_kv(voice: &KvCache, prefix: &str, n_layers: usize) -> KvCache {
     let mut kv = KvCache::new();
     for i in 0..n_layers {
@@ -149,6 +155,7 @@ pub fn extract_kv(voice: &KvCache, prefix: &str, n_layers: usize) -> KvCache {
 }
 
 /// Find `.npz` voice preset files in the model directory.
+#[must_use]
 pub fn list_voice_presets(model_dir: &Path) -> Vec<PathBuf> {
     let mut presets: Vec<PathBuf> = Vec::new();
     if let Ok(entries) = std::fs::read_dir(model_dir) {
@@ -166,6 +173,10 @@ pub fn list_voice_presets(model_dir: &Path) -> Vec<PathBuf> {
 /// Resolve a speaker name to an `.npz` voice preset path.
 ///
 /// Uses case-insensitive substring matching, falling back to the first preset.
+///
+/// # Errors
+///
+/// Returns an error if no `.npz` voice presets exist in `model_dir`.
 pub fn resolve_voice(model_dir: &Path, speaker_name: &str) -> Result<PathBuf> {
     let presets = list_voice_presets(model_dir);
     if presets.is_empty() {

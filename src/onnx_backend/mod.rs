@@ -1,4 +1,4 @@
-//! ONNX Runtime inference backend for VibeVoice-Realtime.
+//! ONNX Runtime inference backend for `VibeVoice-Realtime`.
 //!
 //! Rust port of `vibevoice_full_onnx.py` (nenad1002/microsoft-vibevoice-0.5B-onnx-fp16).
 //!
