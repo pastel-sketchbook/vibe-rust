@@ -242,11 +242,70 @@ impl RealtimeTts {
             output_path: saved_path,
         })
     }
-}
 
-// ---------------------------------------------------------------------------
-// Model directory resolution
-// ---------------------------------------------------------------------------
+    /// Synthesize speech with streaming: audio chunks are passed to `on_chunk`
+    /// as each text window is decoded, enabling playback to begin immediately.
+    ///
+    /// Returns the full [`SynthesisResult`] after generation completes.
+    ///
+    /// See [`onnx_backend::generate_streaming`] for a note on per-chunk
+    /// vocoder boundary artefacts versus single-pass decoding.
+    pub fn synthesize_streaming<F>(
+        &mut self,
+        text: &str,
+        speaker: &str,
+        cfg_scale: f32,
+        output_path: Option<&Path>,
+        on_chunk: F,
+    ) -> Result<SynthesisResult>
+    where
+        F: FnMut(&[f32]),
+    {
+        let voice_path = onnx_backend::resolve_voice(&self.model_dir, speaker)?;
+        let voice = onnx_backend::load_voice_preset(&voice_path)?;
+
+        let start = Instant::now();
+
+        let audio = onnx_backend::generate_streaming(
+            &mut self.sessions,
+            &self.tokenizer,
+            &self.onnx_config,
+            &self.schedule,
+            &voice,
+            text,
+            f64::from(cfg_scale),
+            on_chunk,
+        )?;
+
+        let gen_time = start.elapsed().as_secs_f64();
+
+        let audio = audio.unwrap_or_default();
+        // Audio sample counts and sample rate (24 kHz) fit in f64 without meaningful loss.
+        #[allow(clippy::cast_precision_loss)]
+        let duration = audio.len() as f64 / f64::from(OUTPUT_SR);
+        let rtf = if duration > 0.0 {
+            gen_time / duration
+        } else {
+            0.0
+        };
+
+        // Save if requested
+        let saved_path = if let Some(path) = output_path {
+            utils::save_audio(&audio, path, OUTPUT_SR)?;
+            Some(path.to_path_buf())
+        } else {
+            None
+        };
+
+        Ok(SynthesisResult {
+            audio,
+            duration_secs: duration,
+            generation_time_secs: gen_time,
+            rtf,
+            output_path: saved_path,
+        })
+    }
+}
 
 /// Check whether a directory looks like a valid ONNX model directory.
 fn is_valid_onnx_dir(dir: &Path) -> bool {

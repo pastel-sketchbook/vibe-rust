@@ -14,6 +14,6 @@ mod voice;
 
 pub use config::{DpmSchedule, OnnxConfig};
 pub use dpm_solver::{sigma_to_alpha_sigma, sigma_to_lambda};
-pub use generate::generate;
+pub use generate::{generate, generate_streaming};
 pub use sessions::{OnnxSessions, OnnxSessionsBuilder};
 pub use voice::{KvCache, extract_kv, list_voice_presets, load_voice_preset, resolve_voice};

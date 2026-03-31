@@ -22,13 +22,13 @@ type TtsLmOutput = (Array3<f16>, f32, KvCache);
 
 /// Generate speech audio from text using the ONNX pipeline.
 ///
-/// Returns raw f32 PCM samples at 24 kHz.
+/// Returns raw f32 PCM samples at 24 kHz.  All latents are decoded in a
+/// single vocoder pass for maximum audio quality.
 ///
 /// # Errors
 ///
 /// Returns an error if tokenization, any ONNX session run, or vocoder
 /// decoding fails.
-#[allow(clippy::similar_names)] // new_tts_kvs vs neg_tts_kvs is intentional
 pub fn generate(
     sessions: &mut OnnxSessions,
     tokenizer: &tokenizers::Tokenizer,
@@ -38,6 +38,72 @@ pub fn generate(
     text: &str,
     cfg_scale: f64,
 ) -> Result<Option<Vec<f32>>> {
+    generate_core::<fn(&[f32])>(
+        sessions, tokenizer, config, schedule, voice, text, cfg_scale, None,
+    )
+}
+
+/// Streaming variant of [`generate`].
+///
+/// After each text window produces speech tokens, the new latents from that
+/// window are decoded through the vocoder and the resulting audio chunk is
+/// passed to `on_chunk`.  This lets callers begin playback while generation
+/// continues.
+///
+/// Returns the **total** audio (concatenated from all chunks).
+///
+/// # Audio quality note
+///
+/// Because the vocoder (HiFi-GAN style) relies on convolutional context from
+/// neighbouring frames, decoding latents in per-window chunks produces
+/// slightly different output than a single full-sequence decode.  Boundary
+/// artefacts (small clicks or discontinuities between chunks) may be audible.
+/// Use [`generate`] when offline quality matters more than latency.
+#[allow(clippy::too_many_arguments)]
+pub fn generate_streaming<F>(
+    sessions: &mut OnnxSessions,
+    tokenizer: &tokenizers::Tokenizer,
+    config: &OnnxConfig,
+    schedule: &DpmSchedule,
+    voice: &KvCache,
+    text: &str,
+    cfg_scale: f64,
+    on_chunk: F,
+) -> Result<Option<Vec<f32>>>
+where
+    F: FnMut(&[f32]),
+{
+    generate_core(
+        sessions,
+        tokenizer,
+        config,
+        schedule,
+        voice,
+        text,
+        cfg_scale,
+        Some(on_chunk),
+    )
+}
+
+/// Shared generation core for batch and streaming modes.
+///
+/// When `on_chunk` is `Some`, latents are decoded incrementally after each
+/// text window (streaming).  When `None`, all latents are decoded in one
+/// vocoder pass at the end (batch).
+#[allow(clippy::similar_names, clippy::too_many_arguments)]
+fn generate_core<F>(
+    sessions: &mut OnnxSessions,
+    tokenizer: &tokenizers::Tokenizer,
+    config: &OnnxConfig,
+    schedule: &DpmSchedule,
+    voice: &KvCache,
+    text: &str,
+    cfg_scale: f64,
+    mut on_chunk: Option<F>,
+) -> Result<Option<Vec<f32>>>
+where
+    F: FnMut(&[f32]),
+{
     let text = sanitize_text(text);
     let text_with_nl = text.trim().to_string() + constants::TEXT_SUFFIX_NEWLINE;
 
@@ -70,6 +136,8 @@ pub fn generate(
 
     let mut tts_hidden: Option<Array3<f16>> = None;
     let mut all_latents: Vec<Vec<f32>> = Vec::new();
+    let mut decoded_up_to: usize = 0;
+    let mut streamed_audio: Vec<f32> = Vec::new();
     let mut win_idx: usize = 0;
     let mut finished = false;
 
@@ -111,7 +179,6 @@ pub fn generate(
             continue;
         }
 
-        // Speech token generation loop (extracted to keep fn length manageable).
         let stop = generate_speech_tokens(
             sessions,
             config,
@@ -131,13 +198,34 @@ pub fn generate(
         }
 
         println!("  Window {}: {} speech tokens", win_idx, all_latents.len());
+
+        // Streaming: decode new latents from this window immediately.
+        if let Some(ref mut callback) = on_chunk {
+            let new_count = all_latents.len();
+            if new_count > decoded_up_to {
+                let chunk_audio =
+                    decode_latents_chunk(sessions, config, &all_latents[decoded_up_to..new_count])?;
+                callback(&chunk_audio);
+                streamed_audio.extend_from_slice(&chunk_audio);
+                decoded_up_to = new_count;
+            }
+        }
     }
 
-    if all_latents.is_empty() {
-        return Ok(None);
+    // Batch mode: single full-sequence decode for best quality.
+    if on_chunk.is_none() {
+        if all_latents.is_empty() {
+            return Ok(None);
+        }
+        return decode_latents(sessions, config, &all_latents);
     }
 
-    decode_latents(sessions, config, &all_latents)
+    // Streaming mode: return the concatenated chunks.
+    if streamed_audio.is_empty() {
+        Ok(None)
+    } else {
+        Ok(Some(streamed_audio))
+    }
 }
 
 /// Inner speech-token generation loop for one text window.
@@ -237,15 +325,27 @@ fn generate_speech_tokens(
     Ok(false)
 }
 
-/// Decode collected latents into audio via the vocoder.
+/// Decode collected latents into audio via the vocoder (single full pass).
 fn decode_latents(
     sessions: &mut OnnxSessions,
     config: &OnnxConfig,
     all_latents: &[Vec<f32>],
 ) -> Result<Option<Vec<f32>>> {
     let n_frames = all_latents.len();
+    println!("Decoding {n_frames} frames...");
+    let audio = decode_latents_chunk(sessions, config, all_latents)?;
+    Ok(Some(audio))
+}
+
+/// Decode a slice of latents into audio via the vocoder.
+fn decode_latents_chunk(
+    sessions: &mut OnnxSessions,
+    config: &OnnxConfig,
+    latents: &[Vec<f32>],
+) -> Result<Vec<f32>> {
+    let n_frames = latents.len();
     let mut latent_seq: Vec<f16> = Vec::with_capacity(n_frames * config.latent_dim);
-    for lat in all_latents {
+    for lat in latents {
         for &v in lat {
             #[allow(clippy::cast_possible_truncation)]
             let scaled =
@@ -254,11 +354,7 @@ fn decode_latents(
         }
     }
     let latent_arr = Array3::from_shape_vec((1, n_frames, config.latent_dim), latent_seq)?;
-
-    println!("Decoding {n_frames} frames...");
-    let audio = run_vocoder(&mut sessions.vocoder, &latent_arr)?;
-
-    Ok(Some(audio))
+    run_vocoder(&mut sessions.vocoder, &latent_arr)
 }
 
 /// Run text LM with KV-cache.
