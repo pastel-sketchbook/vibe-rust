@@ -264,13 +264,13 @@ fn main() -> Result<()> {
     };
 
     let project_root = std::env::current_dir()?;
-    let tts = match RealtimeTts::load(config, &project_root) {
+    let mut tts = match RealtimeTts::load(config, &project_root) {
         Ok(t) => t,
         Err(e) => {
             eprintln!("\nCould not load model: {e}");
             eprintln!(
                 "Hint: download first with:\n  \
-                 huggingface-cli download microsoft/VibeVoice-Realtime-0.5B"
+                 hf download nenad1002/microsoft-vibevoice-0.5B-onnx-fp16"
             );
             return Ok(());
         }
@@ -285,9 +285,7 @@ fn main() -> Result<()> {
     for (i, seg) in STORY.iter().enumerate() {
         let idx = i + 1;
         println!("\n[{idx}/{n_segments}] {}", seg.label);
-        let text_preview_len = seg.text.len().min(90);
-        let text_ellipsis = if seg.text.len() > 90 { "..." } else { "" };
-        println!("  {}{text_ellipsis}", &seg.text[..text_preview_len]);
+        println!("  {}", utils::truncate_str(seg.text, 90));
 
         // Build a filename from the label prefix (before ':')
         let label_prefix = seg.label.split(':').next().unwrap_or(seg.label).trim();

@@ -247,6 +247,16 @@ pub fn format_timestamp(seconds: f64) -> String {
     format!("{h:02}:{m:02}:{s:06.3}")
 }
 
+/// Truncate a string to at most `max_chars` characters, appending `...` if truncated.
+///
+/// Unlike byte-based slicing this is safe for multi-byte UTF-8 text (e.g. CJK, emoji).
+pub fn truncate_str(s: &str, max_chars: usize) -> String {
+    match s.char_indices().nth(max_chars) {
+        Some((byte_idx, _)) => format!("{}...", &s[..byte_idx]),
+        None => s.to_string(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -301,5 +311,16 @@ mod tests {
         assert_eq!(detect_dtype(Device::Cuda), DType::BFloat16);
         assert_eq!(detect_dtype(Device::Mps), DType::Float32);
         assert_eq!(detect_dtype(Device::Cpu), DType::Float32);
+    }
+
+    #[test]
+    fn test_truncate_str() {
+        assert_eq!(truncate_str("hello", 10), "hello");
+        assert_eq!(truncate_str("hello world", 5), "hello...");
+        // Korean: each char is 3 bytes — must not panic
+        assert_eq!(truncate_str("가나다라마바사", 3), "가나다...");
+        assert_eq!(truncate_str("가나다", 3), "가나다");
+        assert_eq!(truncate_str("가나다", 10), "가나다");
+        assert_eq!(truncate_str("", 5), "");
     }
 }

@@ -16,7 +16,7 @@ use anyhow::Result;
 use clap::Parser;
 
 use vibe_rust::realtime::{self, RealtimeConfig, RealtimeTts};
-use vibe_rust::utils::Timer;
+use vibe_rust::utils::{self, Timer};
 
 const DEFAULT_TEXT: &str = "\
 VibeVoice is an open-source family of frontier voice AI models from Microsoft. \
@@ -71,10 +71,8 @@ fn main() -> Result<()> {
         DEFAULT_TEXT.to_string()
     };
 
-    let preview_len = text.len().min(200);
-    let ellipsis = if text.len() > 200 { "..." } else { "" };
-    println!("Input text ({} chars):", text.len());
-    println!("  {}{ellipsis}", &text[..preview_len]);
+    println!("Input text ({} chars):", text.chars().count());
+    println!("  {}", utils::truncate_str(&text, 200));
     println!();
 
     // ---- load model ----------------------------------------------------------
@@ -88,13 +86,13 @@ fn main() -> Result<()> {
     };
 
     let project_root = std::env::current_dir()?;
-    let tts = match RealtimeTts::load(config, &project_root) {
+    let mut tts = match RealtimeTts::load(config, &project_root) {
         Ok(t) => t,
         Err(e) => {
             eprintln!("\nCould not load Realtime TTS model: {e}");
             eprintln!(
                 "Hint: download first with:\n  \
-                 huggingface-cli download microsoft/VibeVoice-Realtime-0.5B"
+                 hf download nenad1002/microsoft-vibevoice-0.5B-onnx-fp16"
             );
             return Ok(());
         }

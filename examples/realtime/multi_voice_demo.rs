@@ -16,7 +16,7 @@ use anyhow::Result;
 use clap::Parser;
 
 use vibe_rust::realtime::{self, RealtimeConfig, RealtimeTts};
-use vibe_rust::utils::Timer;
+use vibe_rust::utils::{self, Timer};
 
 // ---------------------------------------------------------------------------
 // Demo utterances
@@ -185,13 +185,13 @@ fn main() -> Result<()> {
     };
 
     let project_root = std::env::current_dir()?;
-    let tts = match RealtimeTts::load(config, &project_root) {
+    let mut tts = match RealtimeTts::load(config, &project_root) {
         Ok(t) => t,
         Err(e) => {
             eprintln!("\nCould not load model: {e}");
             eprintln!(
                 "Hint: download first with:\n  \
-                 huggingface-cli download microsoft/VibeVoice-Realtime-0.5B"
+                 hf download nenad1002/microsoft-vibevoice-0.5B-onnx-fp16"
             );
             return Ok(());
         }
@@ -219,9 +219,7 @@ fn main() -> Result<()> {
             utt.label
         );
         println!("  Voice : {}", utt.voice);
-        let text_preview_len = utt.text.len().min(80);
-        let text_ellipsis = if utt.text.len() > 80 { "..." } else { "" };
-        println!("  Text  : {}{text_ellipsis}", &utt.text[..text_preview_len]);
+        println!("  Text  : {}", utils::truncate_str(utt.text, 80));
 
         let synth_result = {
             let _timer = Timer::new(utt.voice);

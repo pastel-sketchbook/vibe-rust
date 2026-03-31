@@ -289,13 +289,13 @@ fn main() -> Result<()> {
     };
 
     let project_root = std::env::current_dir()?;
-    let tts = match RealtimeTts::load(config, &project_root) {
+    let mut tts = match RealtimeTts::load(config, &project_root) {
         Ok(t) => t,
         Err(e) => {
             eprintln!("\nCould not load model: {e}");
             eprintln!(
                 "Hint: download first with:\n  \
-                 huggingface-cli download microsoft/VibeVoice-Realtime-0.5B"
+                 hf download nenad1002/microsoft-vibevoice-0.5B-onnx-fp16"
             );
             return Ok(());
         }
@@ -311,9 +311,7 @@ fn main() -> Result<()> {
         let idx = i + 1;
         let tag = if seg.voice == EMMA { "Emma" } else { "kr-Spk2" };
         println!("\n[{idx}/{n_segments}] {}  ({tag})", seg.label);
-        let text_preview_len = seg.text.len().min(90);
-        let text_ellipsis = if seg.text.len() > 90 { "..." } else { "" };
-        println!("  {}{text_ellipsis}", &seg.text[..text_preview_len]);
+        println!("  {}", utils::truncate_str(seg.text, 90));
 
         let seg_file = cli.output_dir.join(format!("{idx:02}_{}.wav", seg.voice));
         let synth_result = {

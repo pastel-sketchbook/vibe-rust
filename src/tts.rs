@@ -35,7 +35,7 @@ pub fn check_tts_status() {
         Some(cached) => println!("Weights cached at: {}", cached.display()),
         None => {
             println!("Weights not found in local HuggingFace cache.");
-            println!("  Download with:  huggingface-cli download {MODEL_ID}");
+            println!("  Download with:  hf download {MODEL_ID}");
         }
     }
     println!();

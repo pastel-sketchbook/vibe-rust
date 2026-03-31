@@ -175,3 +175,13 @@ tasks:
     desc: Download experimental voice prompts only
     cmds:
       - bash demo/download_voices.sh --experimental
+
+  models:onnx:
+    desc: Download ONNX model files (fp16, ~1.87 GB) from HuggingFace
+    cmds:
+      - hf download nenad1002/microsoft-vibevoice-0.5B-onnx-fp16
+
+  models:onnx:local:
+    desc: Download ONNX model files to a local directory
+    cmds:
+      - hf download nenad1002/microsoft-vibevoice-0.5B-onnx-fp16 --local-dir models/vibevoice-onnx

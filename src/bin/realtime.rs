@@ -11,7 +11,7 @@ use anyhow::Result;
 use clap::Parser;
 
 use vibe_rust::realtime::{self, RealtimeConfig, RealtimeTts};
-use vibe_rust::utils::Timer;
+use vibe_rust::utils::{self, Timer};
 
 #[derive(Parser)]
 #[command(about = "VibeVoice-Realtime TTS demo")]
@@ -60,12 +60,10 @@ fn main() -> Result<()> {
             .to_string()
     };
 
-    let preview_len = text.len().min(120);
-    let ellipsis = if text.len() > 120 { "..." } else { "" };
     println!(
-        "Text ({} chars): {}{ellipsis}",
-        text.len(),
-        &text[..preview_len]
+        "Text ({} chars): {}",
+        text.chars().count(),
+        utils::truncate_str(&text, 120)
     );
 
     let config = RealtimeConfig {
@@ -78,15 +76,11 @@ fn main() -> Result<()> {
     };
 
     let project_root = std::env::current_dir()?;
-    let tts = match RealtimeTts::load(config, &project_root) {
+    let mut tts = match RealtimeTts::load(config, &project_root) {
         Ok(t) => t,
         Err(e) => {
-            eprintln!("\nCould not load Realtime TTS model: {e}");
-            eprintln!(
-                "Hint: download it first with:\n  \
-                 huggingface-cli download microsoft/VibeVoice-Realtime-0.5B"
-            );
-            process::exit(0);
+            eprintln!("\nCould not load model: {e}");
+            process::exit(1);
         }
     };
 

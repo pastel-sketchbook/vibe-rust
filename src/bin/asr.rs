@@ -83,7 +83,7 @@ fn main() -> Result<()> {
         Err(e) => {
             eprintln!("\nCould not load ASR model: {e}");
             eprintln!("Hint: the 7B model needs ~16 GB VRAM (CUDA) or ~28 GB RAM (CPU/MPS).");
-            eprintln!("Download it first with:  huggingface-cli download microsoft/VibeVoice-ASR");
+            eprintln!("Download it first with:  hf download microsoft/VibeVoice-ASR");
             process::exit(0);
         }
     };
