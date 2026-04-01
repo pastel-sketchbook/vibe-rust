@@ -12,7 +12,7 @@ use std::time::Instant;
 use anyhow::{Context, Result};
 
 use crate::constants;
-use crate::onnx_backend::{self, OnnxConfig, OnnxSessions};
+use crate::onnx_backend::{self, OnnxConfig, OnnxSessions, OnnxSessionsBuilder};
 use crate::utils::{self, Device};
 
 /// Default `HuggingFace` model ID.
@@ -79,6 +79,12 @@ pub struct RealtimeConfig {
     pub model_path: String,
     pub device: Device,
     pub attn_impl: String,
+    /// Number of intra-op threads for ONNX Runtime.
+    ///
+    /// Controls how many CPU threads each ONNX operator can use internally.
+    /// `None` uses the library default (4). Tune this for your hardware:
+    /// Apple Silicon M2 Pro/Max and M3 Pro/Max often benefit from 6–8.
+    pub intra_threads: Option<usize>,
 }
 
 impl Default for RealtimeConfig {
@@ -88,6 +94,7 @@ impl Default for RealtimeConfig {
             model_path: DEFAULT_MODEL.to_string(),
             device,
             attn_impl: utils::detect_attn_impl(device).to_string(),
+            intra_threads: None,
         }
     }
 }
@@ -159,7 +166,11 @@ impl RealtimeTts {
 
         // Load ONNX sessions
         println!("  Loading ONNX sessions...");
-        let sessions = OnnxSessions::load(&model_dir)?;
+        let mut builder = OnnxSessionsBuilder::new();
+        if let Some(threads) = config.intra_threads {
+            builder = builder.with_intra_threads(threads);
+        }
+        let sessions = builder.build(&model_dir)?;
 
         // List available .npz voice presets
         let npz_presets = onnx_backend::list_voice_presets(&model_dir);
