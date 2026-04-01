@@ -1,6 +1,6 @@
 [package]
 name = "vibe-rust"
-version = "0.2.1"
+version = "0.2.2"
 edition = "2024"
 description = "Rust port of vibe-demo — hands-on exploration of Microsoft VibeVoice Voice AI models"
 license = "MIT"

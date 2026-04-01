@@ -197,6 +197,20 @@ fn main() -> Result<()> {
         }
     };
 
+    // Preload all voice presets into cache to avoid I/O during synthesis.
+    // This is especially beneficial when reusing the same voices multiple times.
+    println!("\nPreloading voice presets...");
+    let voices_to_load: Vec<&str> = selected.iter().map(|u| u.voice).collect();
+    if let Err(e) = tts.preload_voices(&voices_to_load) {
+        eprintln!("Warning: Failed to preload some voices: {e}");
+    } else {
+        println!(
+            "  Loaded {} voice presets (~{} MB)",
+            tts.voice_cache_len(),
+            tts.voice_cache_memory_bytes() / (1024 * 1024)
+        );
+    }
+
     // ---- synthesize each utterance -------------------------------------------
     let mut results: Vec<UttResult> = Vec::new();
     let mut total_audio = 0.0_f64;

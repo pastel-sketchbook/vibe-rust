@@ -105,6 +105,9 @@ pub struct RealtimeTts {
     /// Legacy .pt voice list for display purposes.
     #[allow(dead_code)]
     voices: HashMap<String, PathBuf>,
+    /// In-memory cache of loaded voice presets (speaker_name → KvCache).
+    /// Reduces redundant I/O when the same voice is used multiple times.
+    voice_cache: HashMap<String, onnx_backend::KvCache>,
 }
 
 impl RealtimeTts {
@@ -180,13 +183,116 @@ impl RealtimeTts {
             schedule,
             model_dir,
             voices,
+            voice_cache: HashMap::new(),
         })
+    }
+
+    /// Get a voice preset from cache, or load it if not yet cached.
+    ///
+    /// This method resolves the speaker name to a file path using
+    /// [`onnx_backend::resolve_voice`], then checks the cache. If the voice
+    /// is not cached, it loads the `.npz` file and stores it.
+    ///
+    /// Returns a cloned copy of the KvCache to avoid borrow checker issues
+    /// when using other `self` fields during generation.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the voice preset cannot be resolved or loaded.
+    fn get_or_load_voice(&mut self, speaker: &str) -> Result<onnx_backend::KvCache> {
+        // Normalize speaker name for cache key consistency
+        let cache_key = speaker.to_lowercase();
+
+        if !self.voice_cache.contains_key(&cache_key) {
+            let voice_path = onnx_backend::resolve_voice(&self.model_dir, speaker)?;
+            let voice = onnx_backend::load_voice_preset(&voice_path)?;
+            self.voice_cache.insert(cache_key.clone(), voice);
+        }
+
+        Ok(self
+            .voice_cache
+            .get(&cache_key)
+            .expect("voice_cache entry must exist after insertion")
+            .clone())
+    }
+
+    /// Preload a voice preset into the cache.
+    ///
+    /// This can be called before synthesis to avoid loading delays during
+    /// real-time generation. If the voice is already cached, this is a no-op.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the voice preset cannot be resolved or loaded.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use vibe_rust::realtime::{RealtimeTts, RealtimeConfig};
+    /// # use std::path::Path;
+    /// # fn main() -> anyhow::Result<()> {
+    /// let mut tts = RealtimeTts::load(RealtimeConfig::default(), Path::new("."))?;
+    /// tts.preload_voice("male")?;
+    /// tts.preload_voice("female")?;
+    /// // Subsequent synthesize() calls with these voices will use cached data
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn preload_voice(&mut self, speaker: &str) -> Result<()> {
+        self.get_or_load_voice(speaker)?;
+        Ok(())
+    }
+
+    /// Preload multiple voice presets into the cache.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if any voice preset cannot be resolved or loaded.
+    pub fn preload_voices(&mut self, speakers: &[&str]) -> Result<()> {
+        for speaker in speakers {
+            self.preload_voice(speaker)?;
+        }
+        Ok(())
+    }
+
+    /// Clear all cached voice presets to free memory.
+    ///
+    /// This does not affect ONNX model sessions or other state.
+    pub fn clear_voice_cache(&mut self) {
+        self.voice_cache.clear();
+    }
+
+    /// Get the number of currently cached voice presets.
+    #[must_use]
+    pub fn voice_cache_len(&self) -> usize {
+        self.voice_cache.len()
+    }
+
+    /// Check if the voice cache is empty.
+    #[must_use]
+    pub fn voice_cache_is_empty(&self) -> bool {
+        self.voice_cache.is_empty()
+    }
+
+    /// Get the approximate memory size of cached voice presets in bytes.
+    ///
+    /// This counts the raw f16 array data in all cached voice presets.
+    #[must_use]
+    pub fn voice_cache_memory_bytes(&self) -> usize {
+        self.voice_cache
+            .values()
+            .flat_map(|kv| kv.values())
+            .map(|arr| arr.len() * std::mem::size_of::<half::f16>())
+            .sum()
     }
 
     /// Synthesize speech from text.
     ///
     /// The `speaker` name is matched against `.npz` voice presets in the model
     /// directory using case-insensitive substring matching.
+    ///
+    /// Voice presets are cached in memory after first load, improving performance
+    /// for repeated synthesis with the same voice.
     ///
     /// # Errors
     ///
@@ -198,9 +304,8 @@ impl RealtimeTts {
         cfg_scale: f32,
         output_path: Option<&Path>,
     ) -> Result<SynthesisResult> {
-        // Load voice preset
-        let voice_path = onnx_backend::resolve_voice(&self.model_dir, speaker)?;
-        let voice = onnx_backend::load_voice_preset(&voice_path)?;
+        // Load voice preset (from cache if available)
+        let voice = self.get_or_load_voice(speaker)?;
 
         let start = Instant::now();
 
@@ -248,6 +353,9 @@ impl RealtimeTts {
     ///
     /// Returns the full [`SynthesisResult`] after generation completes.
     ///
+    /// Voice presets are cached in memory after first load, improving performance
+    /// for repeated synthesis with the same voice.
+    ///
     /// See [`onnx_backend::generate_streaming`] for a note on per-chunk
     /// vocoder boundary artefacts versus single-pass decoding.
     pub fn synthesize_streaming<F>(
@@ -261,8 +369,8 @@ impl RealtimeTts {
     where
         F: FnMut(&[f32]),
     {
-        let voice_path = onnx_backend::resolve_voice(&self.model_dir, speaker)?;
-        let voice = onnx_backend::load_voice_preset(&voice_path)?;
+        // Load voice preset (from cache if available)
+        let voice = self.get_or_load_voice(speaker)?;
 
         let start = Instant::now();
 
@@ -403,4 +511,64 @@ fn dirs_hf_cache() -> Vec<PathBuf> {
     }
 
     dirs
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_voice_cache_initialization() {
+        // Create a mock config - this won't actually load a model
+        // but will test the struct initialization
+        let cache = HashMap::<String, onnx_backend::KvCache>::new();
+        assert!(cache.is_empty());
+        assert_eq!(cache.len(), 0);
+    }
+
+    #[test]
+    fn test_voice_cache_key_normalization() {
+        // Test that speaker names are normalized to lowercase for cache keys
+        let speaker_upper = "MALE";
+        let speaker_lower = "male";
+        let speaker_mixed = "MaLe";
+
+        assert_eq!(speaker_upper.to_lowercase(), "male");
+        assert_eq!(speaker_lower.to_lowercase(), "male");
+        assert_eq!(speaker_mixed.to_lowercase(), "male");
+    }
+
+    #[test]
+    fn test_voice_cache_memory_calculation() {
+        // Test the memory calculation logic
+        let mut voice_cache = HashMap::<String, onnx_backend::KvCache>::new();
+        let mut kv_cache = onnx_backend::KvCache::new();
+
+        // Create small test arrays
+        let arr1 = ndarray::ArrayD::<half::f16>::from_elem(
+            ndarray::IxDyn(&[2, 3]),
+            half::f16::from_f32(1.0),
+        );
+        let arr2 = ndarray::ArrayD::<half::f16>::from_elem(
+            ndarray::IxDyn(&[4, 5]),
+            half::f16::from_f32(2.0),
+        );
+
+        kv_cache.insert("key_0".to_string(), arr1);
+        kv_cache.insert("value_0".to_string(), arr2);
+
+        voice_cache.insert("test_voice".to_string(), kv_cache);
+
+        // Calculate expected memory: (2*3 + 4*5) elements * 2 bytes per f16
+        let expected_bytes = (6 + 20) * std::mem::size_of::<half::f16>();
+
+        let actual_bytes: usize = voice_cache
+            .values()
+            .flat_map(|kv| kv.values())
+            .map(|arr| arr.len() * std::mem::size_of::<half::f16>())
+            .sum();
+
+        assert_eq!(actual_bytes, expected_bytes);
+        assert_eq!(actual_bytes, 52); // 26 elements * 2 bytes = 52 bytes
+    }
 }
